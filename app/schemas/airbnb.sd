@@ -1,0 +1,38 @@
+schema airbnb {
+    document airbnb {
+        field id type int {
+            indexing: summary | attribute
+        }
+        field name type string {
+            indexing: summary | index
+        }
+        field space type string {
+            indexing: summary | index
+        }
+        field amenities type array<string> {
+            indexing: summary | attribute
+        }
+        field price type int {
+            indexing: summary | attribute
+        }
+        field text_embeddings type tensor<float>(x[1536]) {
+            indexing: summary | attribute | index
+            attribute {
+                distance-metric: angular
+            }
+        }
+    }
+
+    fieldset default {
+        fields: name, space
+    }
+
+    rank-profile vector_similarity {
+        inputs {
+            query(q_vec) tensor<float>(x[1536])
+        }
+        first-phase {
+            expression: closeness(field, text_embeddings)
+        }
+    }
+}

@@ -1,0 +1,73 @@
+services:
+  vespa:
+    image: vespaengine/vespa:8
+    ports:
+      - "8080:8080"
+      - "19071:19071"
+      - "19070:19070"
+    volumes:
+      - ./app:/app
+      - vespa-data:/opt/vespa/var
+    hostname: vespa
+    environment:
+      - VESPA_CONFIGSERVERS=vespa
+      - VESPA_CONFIGSERVER_JVMARGS=-Xms256m -Xmx256m
+      - VESPA_CONFIGPROXY_JVMARGS=-Xms128m -Xmx128m
+      - VESPA_SERVICE_NAME=configserver
+      - VESPA_CONFIG_SERVERS=localhost:19070
+      - VESPA_CONFIG_PROTOCOL=tcp
+      - VESPA_CONFIG_PORT=19070
+      - VESPA_CONFIG_TIMEOUT=60
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19071/state/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    entrypoint: ["bash", "-c"]
+    command: >
+      "sleep 10 &&
+      /opt/vespa/bin/vespa-start-configserver &&
+      /opt/vespa/bin/vespa-start-services &&
+      tail -f /dev/null"
+
+  vespa-deploy:
+    image: alpine:latest
+    volumes:
+      - ./app:/app
+    depends_on:
+      vespa:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command: >
+      "apk add --no-cache zip curl &&
+      cd /app &&
+      zip -r - . |
+      curl -H 'Content-Type: application/zip'
+      --data-binary @-
+      'http://vespa:19071/application/v2/tenant/default/prepareandactivate'"
+
+  feeder:
+    build:
+      context: .
+      dockerfile: data/Dockerfile
+    volumes:
+      - ./data:/app
+    depends_on:
+      vespa-deploy:
+        condition: service_completed_successfully
+
+  search:
+    build:
+      context: .
+      dockerfile: search/Dockerfile
+    volumes:
+      - ./search:/app
+    depends_on:
+      vespa-deploy:
+        condition: service_completed_successfully
+    stdin_open: true
+    tty: true
+
+volumes:
+  vespa-data:
