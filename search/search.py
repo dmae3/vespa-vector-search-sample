@@ -22,12 +22,18 @@ class AirbnbSearch:
         # 検索クエリの構築
         yql = "select id, name, space, amenities, price, text_embeddings from airbnb where {}"
 
-        # Price pre-filtering
+        # 基本条件の設定
         conditions = ["{targetHits:10}nearestNeighbor(text_embeddings,q)"]
+
+        # Price pre-filtering
         if min_price is not None:
             conditions.append(f"price >= {min_price}")
         if max_price is not None:
             conditions.append(f"price <= {max_price}")
+
+        # WiFi filtering
+        if wifi_required:
+            conditions.append("amenities contains 'Wifi'")
 
         # 条件がある場合は追加、ない場合はtrue（すべてのドキュメントにマッチ）
         where_clause = " and ".join(conditions) if conditions else "true"
