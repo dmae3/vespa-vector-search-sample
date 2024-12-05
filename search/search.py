@@ -1,68 +1,58 @@
 import requests
-from sentence_transformers import SentenceTransformer
-import json
+import openai
 import time
+import json
 
 
 class AirbnbSearch:
     def __init__(self):
-        self.model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        self.client = openai.OpenAI()
         self.base_url = "http://vespa:8080/search/"
 
     def get_text_embedding(self, text):
-        return self.model.encode(text).tolist()
+        response = self.client.embeddings.create(
+            input=text, model="text-embedding-3-small"
+        )
+        return response.data[0].embedding
 
     def search(self, query_text, min_price=None, max_price=None, wifi_required=False):
         # テキストをベクトル化
         query_vector = self.get_text_embedding(query_text)
 
         # 検索クエリの構築
-        yql = "select _id, name, space, amenities, price from airbnb where "
+        yql = "select id, name, space, amenities, price, text_embeddings from airbnb where {}"
 
         # Price pre-filtering
-        if min_price is not None or max_price is not None:
-            price_conditions = []
-            if min_price is not None:
-                price_conditions.append(f"price >= {min_price}")
-            if max_price is not None:
-                price_conditions.append(f"price <= {max_price}")
-            yql += " and ".join(price_conditions)
+        conditions = ["{targetHits:10}nearestNeighbor(text_embeddings,q)"]
+        if min_price is not None:
+            conditions.append(f"price >= {min_price}")
+        if max_price is not None:
+            conditions.append(f"price <= {max_price}")
+
+        # 条件がある場合は追加、ない場合はtrue（すべてのドキュメントにマッチ）
+        where_clause = " and ".join(conditions) if conditions else "true"
+        yql = yql.format(where_clause)
 
         search_request = {
             "yql": yql,
-            "input.query(q_vec)": query_vector,
-            "ranking": "vector_similarity",
             "hits": 10,
+            "ranking": "closeness",
+            "input.query(q)": query_vector,
+            "timeout": "10s",
         }
 
         response = requests.post(self.base_url, json=search_request)
         results = response.json()
 
-        # WiFi post-filtering
-        if wifi_required:
-            filtered_results = []
-            for hit in results.get("root", {}).get("children", []):
-                if "WiFi" in hit["fields"]["amenities"]:
-                    filtered_results.append(
-                        {
-                            "_id": hit["fields"]["id"],
-                            "name": hit["fields"]["name"],
-                            "space": hit["fields"]["space"],
-                            "amenities": hit["fields"]["amenities"],
-                            "price": hit["fields"]["price"],
-                            "similarity_score": hit["relevance"],
-                        }
-                    )
-            return filtered_results
-
+        # 結果の処理
         return [
             {
-                "_id": hit["fields"]["id"],
-                "name": hit["fields"]["name"],
-                "space": hit["fields"]["space"],
-                "amenities": hit["fields"]["amenities"],
-                "price": hit["fields"]["price"],
-                "similarity_score": hit["relevance"],
+                "id": hit.get("fields", {}).get("id"),
+                "name": hit.get("fields", {}).get("name"),
+                "space": hit.get("fields", {}).get("space"),
+                "amenities": hit.get("fields", {}).get("amenities", []),
+                "price": hit.get("fields", {}).get("price"),
+                "similarity_score": hit.get("relevance", 0.0),
             }
             for hit in results.get("root", {}).get("children", [])
         ]
@@ -100,7 +90,7 @@ def main():
 
             min_price = input("最小価格を入力してください（スキップする場合はEnter）: ")
             max_price = input("最大価格を入力してください（スキップする場合はEnter）: ")
-            wifi_required = input("WiFiは必須ですか？ (y/n): ").lower() == "y"
+            wifi_required = input("WiFiは必須すか？ (y/n): ").lower() == "y"
 
             # 価格のバリデーション
             min_price = int(min_price) if min_price else None
@@ -113,10 +103,14 @@ def main():
             for result in results:
                 print("\n---")
                 print(f"Name: {result['name']}")
-                print(f"Space: {result['space'][:200]}...")
+                space_text = result["space"] if result["space"] else ""
+                print(f"Space: {space_text[:200]}...")
                 print(f"Price: ${result['price']}")
                 print(f"Score: {result['similarity_score']:.3f}")
-                print(f"Amenities: {', '.join(result['amenities'][:5])}...")
+                amenities_text = (
+                    ", ".join(result["amenities"]) if result["amenities"] else ""
+                )
+                print(f"Amenities: {amenities_text}")
 
         except KeyboardInterrupt:
             break

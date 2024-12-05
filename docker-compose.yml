@@ -68,6 +68,11 @@ services:
         condition: service_completed_successfully
     stdin_open: true
     tty: true
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    restart: always
+    command: ["python", "-u", "search.py"]
 
 volumes:
   vespa-data:

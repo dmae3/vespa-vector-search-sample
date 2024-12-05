@@ -16,20 +16,17 @@ schema airbnb {
             indexing: summary | attribute
         }
         field text_embeddings type tensor<float>(x[1536]) {
-            indexing: summary | attribute | index
+            indexing: attribute | index
             attribute {
                 distance-metric: angular
             }
         }
     }
 
-    fieldset default {
-        fields: name, space
-    }
-
-    rank-profile vector_similarity {
+    rank-profile closeness {
+        match-features: distance(field, text_embeddings)
         inputs {
-            query(q_vec) tensor<float>(x[1536])
+            query(q) tensor<float>(x[1536])
         }
         first-phase {
             expression: closeness(field, text_embeddings)
